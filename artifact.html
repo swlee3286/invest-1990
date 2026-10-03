@@ -1,0 +1,52 @@
+<title>1990 투자 시뮬레이션</title>
+<link rel="stylesheet" href="style.css">
+<!-- 아티팩트 배포용 진입 파일. 로컬 실행은 index.html을 쓰고, 화면 구조를 바꾸면 두 파일을 같이 고칠 것 -->
+
+<div id="app">
+  <!-- 상단 상태 바 -->
+  <header class="status">
+    <div class="stats">
+      <div class="stat"><span>현금</span><b id="s-cash">-</b></div>
+      <div class="stat"><span>자산</span><b id="s-assets">-</b></div>
+      <div class="stat"><span>부채</span><b id="s-debt">-</b></div>
+    </div>
+    <div class="rank"><span>사회적 위치</span><b id="s-title">-</b></div>
+  </header>
+
+  <!-- 날짜 · 나이 · 다음 달 -->
+  <div class="timebar">
+    <div><b id="t-date">1990년 1월</b> <span id="t-age">25세</span></div>
+    <div class="progress"><div id="t-progress"></div></div>
+    <button id="next-btn" class="primary">다음 달 ▶</button>
+  </div>
+
+  <!-- 중앙: 그래프 + 뉴스 한 줄 + 정보 창 -->
+  <main>
+    <section class="chart-box">
+      <div class="chart-title" id="chart-title">내 총자산 추이</div>
+      <canvas id="chart"></canvas>
+    </section>
+    <div class="ticker" id="ticker"></div>
+    <section class="info" id="info"></section>
+  </main>
+
+  <!-- 하단 탭 -->
+  <nav class="tabs" id="tabs">
+    <button data-tab="stock">주식</button>
+    <button data-tab="land">땅</button>
+    <button data-tab="coin">코인</button>
+    <button data-tab="bond">채권</button>
+    <button data-tab="gold">금</button>
+    <button data-tab="bank">은행</button>
+    <button data-tab="news">뉴스</button>
+    <button data-tab="mine">내 자산</button>
+  </nav>
+</div>
+
+<!-- 시작 / 결산 창 -->
+<div class="modal" id="modal" hidden><div class="modal-card" id="modal-card"></div></div>
+
+<script src="stocks.js"></script>
+<script src="market.js"></script>
+<script src="data.js"></script>
+<script src="game.js"></script>
