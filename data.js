@@ -13,7 +13,7 @@ const SETTINGS = {
   propertyGainTax: 0.2,     // 부동산 양도차익세
   coinGainTax: 0,           // 코인 과세 (현재 비과세)
 
-  capitalOptions: [5_000_000, 10_000_000, 50_000_000],
+  startCapital: 10_000_000, // 초기 자금 (고정): 1990년 회사원 연봉 약 1년치
   defaultAge: 25,
   retireAge: 60,
 

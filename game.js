@@ -723,7 +723,6 @@ function renderChart() {
 
 // ===== 시작 / 결산 / 파산 =====
 function showStart() {
-  let capital = SETTINGS.capitalOptions[1];
   let job = "office";
   const saved = loadSave();
   const card = $("modal-card");
@@ -734,11 +733,7 @@ function showStart() {
     <h2>1990년 1월로 돌아갑니다</h2>
     <p class="sub">2026년 10월까지, 실제 역사 속에서 자산을 불려 보세요.</p>
     ${sd ? `<button class="primary" id="continue">이어하기 · ${sd.y}년 ${sd.m}월 (${SETTINGS.jobs[saved.job].name})</button><hr>` : ""}
-    <label>초기 자금</label>
-    <div class="opts" id="cap-opts">
-      ${SETTINGS.capitalOptions.map((v) => `<button class="chip" data-v="${v}">${won(v)}</button>`).join("")}
-      <input id="cap-custom" inputmode="numeric" placeholder="직접 입력(원)" style="width:140px">
-    </div>
+    <p class="sub">모아 둔 돈 ${won(SETTINGS.startCapital)}으로 시작합니다.</p>
     <label>직업</label>
     <div class="opts" id="job-opts">
       ${Object.entries(SETTINGS.jobs).map(([k, j]) => `<button class="chip" data-job="${k}">${j.name} · 월 ${won(j.salary)}${j.vol >= 0.2 ? " (변동 큼)" : ""}</button>`).join("")}
@@ -746,18 +741,11 @@ function showStart() {
     <label>시작 나이 (${SETTINGS.retireAge}세에 은퇴)</label>
     <select id="age">${ages}</select>
     <button class="primary" id="start">새로 시작하기</button>`;
-  const mark = () => {
-    card.querySelectorAll("#cap-opts .chip").forEach((b) => b.classList.toggle("on", Number(b.dataset.v) === capital));
+  const mark = () =>
     card.querySelectorAll("#job-opts .chip").forEach((b) => b.classList.toggle("on", b.dataset.job === job));
-  };
-  card.querySelectorAll("#cap-opts .chip").forEach((b) => (b.onclick = () => { capital = Number(b.dataset.v); $("cap-custom").value = ""; mark(); }));
   card.querySelectorAll("#job-opts .chip").forEach((b) => (b.onclick = () => { job = b.dataset.job; mark(); }));
-  $("cap-custom").oninput = (e) => {
-    const v = Number(e.target.value.replace(/[^\d]/g, ""));
-    if (v > 0) { capital = v; mark(); }
-  };
   mark();
-  $("start").onclick = () => { $("modal").hidden = true; newGame(capital, Number($("age").value), job); };
+  $("start").onclick = () => { $("modal").hidden = true; newGame(SETTINGS.startCapital, Number($("age").value), job); };
   if (sd) $("continue").onclick = () => { state = saved; $("modal").hidden = true; render(); };
   $("modal").hidden = false;
 }
