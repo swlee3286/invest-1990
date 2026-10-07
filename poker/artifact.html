@@ -1,0 +1,79 @@
+<title>Claude 헤즈업 홀덤</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+<!-- 아티팩트 배포용 진입 파일. 로컬 실행은 index.html을 쓰고, 화면 구조를 바꾸면 두 파일을 같이 고칠 것 -->
+
+<div id="app">
+  <header class="topbar">
+    <div class="brand">헤즈업 홀덤 <span>vs Claude</span></div>
+    <div class="level" id="level">핸드 <b>#1</b> · 블라인드 <b>10/20</b></div>
+    <div class="top-right">
+      <div class="link" id="link"><i class="dot checking" id="link-dot"></i><span id="link-text">Claude 연결 확인 중</span></div>
+      <div class="seg" id="depth" role="group" aria-label="Claude 생각 깊이" hidden>
+        <button type="button" data-depth="quick" aria-pressed="true">빠르게</button>
+        <button type="button" data-depth="default" aria-pressed="false">깊게</button>
+      </div>
+      <button class="link-btn" id="retry" type="button" hidden>다시 연결</button>
+      <button class="link-btn" id="new-game" type="button">새 게임</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <section class="play">
+      <div class="table">
+        <!-- 위: Claude -->
+        <div class="seat seat-claude" id="seat-1">
+          <div class="seat-row">
+            <div class="plate">
+              <span class="avatar" aria-hidden="true">C</span>
+              <div><b>Claude</b><span class="stack" id="stack-1">2,000</span></div>
+              <span class="dealer" id="dealer-1" hidden>D</span>
+            </div>
+            <div class="hole" id="hole-1"><div class="card back" data-k="back"></div><div class="card back" data-k="back"></div></div>
+            <div class="bubble" id="bubble" aria-live="polite"></div>
+          </div>
+          <div class="seat-meta"><span class="act" id="act-1"></span><span class="hand-label" id="label-1"></span></div>
+          <div class="bet" id="bet-1"></div>
+        </div>
+
+        <!-- 가운데: 보드 -->
+        <div class="center">
+          <div class="board" id="board">
+            <div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div>
+          </div>
+          <div class="pot" id="pot"></div>
+          <div class="result" id="result" aria-live="polite"></div>
+          <div class="print">No Limit · Heads-Up</div>
+        </div>
+
+        <!-- 아래: 나 -->
+        <div class="seat seat-you" id="seat-0">
+          <div class="bet" id="bet-0"></div>
+          <div class="seat-meta"><span class="act" id="act-0"></span><span class="hand-label" id="label-0"></span></div>
+          <div class="seat-row">
+            <div class="hole" id="hole-0"><div class="card back" data-k="back"></div><div class="card back" data-k="back"></div></div>
+            <div class="plate">
+              <span class="avatar" aria-hidden="true">나</span>
+              <div><b>나</b><span class="stack" id="stack-0">2,000</span></div>
+              <span class="dealer" id="dealer-0" hidden>D</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls" id="controls"><div class="waiting">게임을 시작하면 카드를 나눠줍니다</div></div>
+    </section>
+
+    <aside class="log-panel">
+      <h2>핸드 기록</h2>
+      <ol class="log" id="log"></ol>
+    </aside>
+  </div>
+</div>
+
+<div class="modal" id="modal" hidden><div class="modal-card" id="modal-card" role="dialog" aria-modal="true"></div></div>
+
+<script src="engine.js"></script>
+<script src="game.js"></script>
