@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Claude 헤즈업 홀덤</title>
+  <title>Claude 홀덤 테이블</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
@@ -12,10 +12,10 @@
 <body>
   <div id="app">
     <header class="topbar">
-      <div class="brand">헤즈업 홀덤 <span>vs Claude</span></div>
-      <div class="level" id="level">핸드 <b>#1</b> · 블라인드 <b>10/20</b></div>
+      <div class="brand">홀덤 테이블 <span>vs Claude</span></div>
+      <div class="level" id="level">블라인드 <b>10/20</b></div>
       <div class="top-right">
-        <div class="link" id="link"><i class="dot checking" id="link-dot"></i><span id="link-text">Claude 연결 확인 중</span></div>
+        <div class="link" id="link"><i class="dot checking" id="link-dot"></i><span id="link-text">Claude 연결 확인 중</span><span class="link-short" id="link-short">확인 중</span></div>
         <div class="seg" id="depth" role="group" aria-label="Claude 생각 깊이" hidden>
           <button type="button" data-depth="quick" aria-pressed="true">빠르게</button>
           <button type="button" data-depth="default" aria-pressed="false">깊게</button>
@@ -27,48 +27,22 @@
 
     <div class="layout">
       <section class="play">
-        <div class="table">
-          <!-- 위: Claude -->
-          <div class="seat seat-claude" id="seat-1">
-            <div class="seat-row">
-              <div class="plate">
-                <span class="avatar" aria-hidden="true">C</span>
-                <div><b>Claude</b><span class="stack" id="stack-1">2,000</span></div>
-                <span class="dealer" id="dealer-1" hidden>D</span>
-              </div>
-              <div class="hole" id="hole-1"><div class="card back" data-k="back"></div><div class="card back" data-k="back"></div></div>
-              <div class="bubble" id="bubble" aria-live="polite"></div>
+        <div class="stage">
+          <div class="table" id="table">
+            <div class="felt" aria-hidden="true"></div>
+            <!-- 가운데: 보드 · 팟 -->
+            <div class="center">
+              <div class="board" id="board"></div>
+              <div class="pot" id="pot"></div>
+              <div class="sidepots" id="sidepots"></div>
+              <div class="print" id="print">No Limit</div>
             </div>
-            <div class="seat-meta"><span class="act" id="act-1"></span><span class="hand-label" id="label-1"></span></div>
-            <div class="bet" id="bet-1"></div>
-          </div>
-
-          <!-- 가운데: 보드 -->
-          <div class="center">
-            <div class="board" id="board">
-              <div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div><div class="card slot" data-k="slot"></div>
-            </div>
-            <div class="pot" id="pot"></div>
-            <div class="result" id="result" aria-live="polite"></div>
-            <div class="print">No Limit · Heads-Up</div>
-          </div>
-
-          <!-- 아래: 나 -->
-          <div class="seat seat-you" id="seat-0">
-            <div class="bet" id="bet-0"></div>
-            <div class="seat-meta"><span class="act" id="act-0"></span><span class="hand-label" id="label-0"></span></div>
-            <div class="seat-row">
-              <div class="hole" id="hole-0"><div class="card back" data-k="back"></div><div class="card back" data-k="back"></div></div>
-              <div class="plate">
-                <span class="avatar" aria-hidden="true">나</span>
-                <div><b>나</b><span class="stack" id="stack-0">2,000</span></div>
-                <span class="dealer" id="dealer-0" hidden>D</span>
-              </div>
-            </div>
+            <!-- 자리 · 베팅 칩: game.js가 인원에 맞춰 만든다 -->
+            <div id="seats"></div>
           </div>
         </div>
 
-        <div class="controls" id="controls"><div class="waiting">게임을 시작하면 카드를 나눠줍니다</div></div>
+        <div class="controls" id="controls"><div class="waiting">인원을 고르면 카드를 나눠줍니다</div></div>
       </section>
 
       <aside class="log-panel">
@@ -81,6 +55,8 @@
   <div class="modal" id="modal" hidden><div class="modal-card" id="modal-card" role="dialog" aria-modal="true"></div></div>
 
   <script src="engine.js"></script>
+  <script src="table.js"></script>
+  <script src="gto.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
