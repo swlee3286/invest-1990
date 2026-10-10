@@ -152,7 +152,7 @@ kbd { font: 500 11px var(--mono); opacity: .55; margin-left: 4px; }
   position: absolute; left: 50%; bottom: calc(100% - 8px); transform: translateX(-50%);
   display: flex; gap: 3px; z-index: 0;
 }
-.seat.below .hole { bottom: auto; top: calc(100% - 8px); }
+.seat.below .hole { bottom: auto; top: calc(100% + 3px); } /* 위쪽 자리: 명패가 카드 숫자를 가리지 않게 */
 .seat.me .hole { --w: var(--cw-me); gap: 6px; bottom: calc(100% - 4px); }
 
 .seat.turn .plate { border-color: var(--brass); box-shadow: 0 0 0 3px rgba(209, 171, 94, .25), 0 6px 16px rgba(0, 0, 0, .35); }
@@ -449,11 +449,12 @@ kbd { font: 500 11px var(--mono); opacity: .55; margin-left: 4px; }
   .avatar { width: 26px; height: 26px; font-size: 12px; }
   .seat.me .avatar { font-size: 11px; }
   .nm b { font-size: 11px; }
-  .pos { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font-size: 9px; padding: 0 5px; border-radius: 999px; background: var(--plate); border: 1px solid var(--line); line-height: 1.4; }
+  .pos { position: absolute; top: -13px; left: 50%; transform: translateX(-50%); font-size: 9px; padding: 0 5px; border-radius: 999px; background: var(--plate); border: 1px solid var(--line); line-height: 1.4; }
+  .seat:not(.below) .pos { top: auto; bottom: -13px; } /* 카드가 명패 위에 붙는 자리: 포지션은 명패 아래로 */
   .stack { font-size: 12px; }
   .dealer { width: 17px; height: 17px; font-size: 9px; top: -6px; right: -6px; }
   .seat .hole { gap: 2px; bottom: calc(100% - 5px); }
-  .seat.below .hole { top: calc(100% - 5px); }
+  .seat.below .hole { top: calc(100% + 2px); }
   .seat.me .hole { gap: 4px; }
   .made { left: calc(50% + var(--cw-me) + 8px); bottom: calc(100% + 16px); font-size: 11px; padding: 1px 8px; }
   .tag { font-size: 10.5px; padding: 0 7px; }
