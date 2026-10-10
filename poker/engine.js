@@ -162,5 +162,8 @@ function equity(hole, board, iters = 1500) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { evaluate, describe, describeEn, bestFive, equity, shuffledDeck, cardCode, cardLabel, categoryOf, RANKS, SUITS };
+  module.exports = {
+    evaluate, describe, describeEn, bestFive, equity, shuffledDeck, randInt, cardCode, cardLabel, categoryOf, topRanks,
+    rankOf, suitOf, isRed, straightHigh, RANKS, SUITS, SUIT_SYMBOL, RANK_LABEL, CAT_KO, CAT_EN,
+  };
 }
