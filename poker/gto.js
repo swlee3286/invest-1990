@@ -199,7 +199,7 @@ const LIMP_SRC = {
   SB: ["88+, ATs+, AJo+, KJs+, KQo, A5s:0.4",
     "77-22, A9s-A2s, K9s-K2s:0.6, KTs:0.6, Q8s+, J8s+, T8s+, 97s+, 86s+, 75s+, 64s+, 54s, ATo:0.5, A9o-A2o:0.5, KJo:0.6, KTo-K8o:0.5, QTo+, JTo, T9o:0.6, 98o:0.4"],
   BB: ["88+, ATs+, AJo+, KQs, KJs:0.6, KQo:0.6, A5s:0.4", ""],
-  HU_BB: ["55+, A2s+, K8s+, Q9s+, J9s+, T9s, A7o+, KTo+, QJo, 98s:0.5, 87s:0.5, 76s:0.5, 65s:0.4, A5o-A2o:0.4", ""],
+  HU_BB: ["55+, A2s+, K8s+, Q9s+, J9s+, T9s, A7o+, KTo+, QJo, 98s:0.5, 87s:0.5, 76s:0.5, 65s:0.4, A5o-A2o:0.4", ""], // 블라인드 대 블라인드에도 쓴다
 };
 // 푸시/폴드: 10bb 기준 올인 비율 (앤티 없음), 스택이 얕을수록 넓힌다
 const PUSH10 = { UTG: 0.12, HJ: 0.15, CO: 0.2, BTN: 0.3, SB: 0.52, HU: 0.58 };
@@ -228,6 +228,30 @@ function widen(r, c, w) { // BB가 싼 가격에 콜을 넓힌다
   return out;
 }
 const rangeWidth = (W) => { let t = 0; for (let i = 0; i < NC; i++) t += W[i]; return t / NC; };
+// 레인지 R(클래스 가중치) 안에서 RANKING 순 상위 q 비율에 드는 몫 (경계 클래스는 부분)
+function topShare(R, q) {
+  let need = 0;
+  for (let c = 0; c < NCLS; c++) need += R[c] * CLS_SIZE[c];
+  need *= q;
+  const out = new Float32Array(NCLS);
+  for (const c of RANK_ORDER) {
+    if (need <= 0) break;
+    const m = R[c] * CLS_SIZE[c];
+    if (m <= 0) continue;
+    out[c] = Math.min(1, need / m);
+    need -= m;
+  }
+  return out;
+}
+// 추적 레인지(조합 가중치)를 바닥값을 걷어낸 클래스 가중치로: 내 레인지가 실제로 어땠는지
+function ownRange(W) {
+  let mx = 0;
+  for (let i = 0; i < NC; i++) if (W[i] > mx) mx = W[i];
+  const sum = new Float64Array(NCLS), out = new Float32Array(NCLS);
+  for (let i = 0; i < NC; i++) sum[CLS[i]] += W[i];
+  for (let c = 0; c < NCLS; c++) out[c] = mx > 0 ? clamp((sum[c] / (CLS_SIZE[c] * mx) - 0.045) / 0.955, 0, 1) : 0;
+  return out;
+}
 
 // ===== 액션 재생 (공개 정보만) =====
 // 좌석별 레인지(W), 스택·베팅, 프리플롭 레이즈 기록, 스트리트별 마지막 공격자를 재구성한다.
@@ -280,35 +304,49 @@ function stepReplay(st, h, a) {
   }
   const kind = a.type === "fold" ? 0 : a.type === "check" || a.type === "call" ? 1 : 2;
   if (st.W[s]) {
-    try { observe(st, h, s, kind); } catch (e) { STATS.trackErrors++; STATS.lastError = String(e && e.stack || e); } // 레인지 갱신 실패는 건너뛴다
+    try { observe(st, h, s, kind, a); } catch (e) { STATS.trackErrors++; STATS.lastError = String(e && e.stack || e); } // 레인지 갱신 실패는 건너뛴다
   }
   if (a.type === "fold") st.folded[s] = true;
   else if (a.type === "call") {
     payIn(st, s, a.amount);
     if (st.street === 0) (st.raises.length ? st.callers : st.limpers).push(s);
   } else if (a.type === "bet" || a.type === "raise") {
+    const from = st.bets[s];
     payIn(st, s, a.to - st.bets[s]);
     st.maxBet = Math.max(st.maxBet, a.to);
     st.aggr[st.street] = s;
     st.nBets++;
-    if (st.street === 0) { st.raises.push({ seat: s, to: a.to, allin: !!a.allin }); st.callers = []; }
+    if (st.street === 0) {
+      let n = 0; // 이 레이즈를 마주하는(칩이 남은) 사람 수
+      for (const o of st.seats) if (o !== s && !st.folded[o] && st.stack[o] > 0) n++;
+      st.raises.push({ seat: s, to: a.to, from, n, allin: !!a.allin });
+      st.callers = [];
+    }
   }
   st.acted[s] = true;
   if (st.street === 0) st.preActs[s]++;
 }
 
 // 같은 모델로 계산한 '그 액션을 할 확률'을 곱해 레인지를 좁힌다
-function observe(st, h, s, kind) {
+function observe(st, h, s, kind, a) {
   const W = st.W[s];
   if (st.street === 0) {
     const x = preCtx(st, s), S = preStrat(x);
     const canR = x.canRaise;
+    const allin = kind === 2 && !!(a && a.allin);
+    // 모델이 올인하지 않는 깊이에서 올인했다: 일반 레이즈 차트 대신 크기에 맞춘 좁은 올인 레인지로 본다
+    let jamR = null;
+    if (allin && S.to !== JAM && x.effBB > PUSH_BB) {
+      const key = x.hu ? "HU" : PUSH10[x.pos] ? x.pos : "BTN";
+      jamR = rankTop(clamp(x.raises.length ? 0.5 * rangePct(S.r) : pushWidth(key, x.effBB), 0.02, 1));
+    }
+    const fl = allin ? 0.004 : FLOOR; // 올인은 바닥값을 낮춰 좁은 레인지가 쓰레기 패로 부풀지 않게
     const lik = new Float32Array(NCLS);
     for (let c = 0; c < NCLS; c++) {
-      let r = S.r[c], cc = S.c[c];
+      let r = jamR ? jamR[c] : S.r[c], cc = S.c[c];
       if (!canR) { cc = Math.min(1, cc + r); r = 0; }
       const v = kind === 2 ? r : kind === 1 ? cc : 1 - r - cc;
-      lik[c] = v > FLOOR ? v : FLOOR;
+      lik[c] = v > fl ? v : fl;
     }
     for (let i = 0; i < NC; i++) W[i] *= lik[CLS[i]];
   } else {
@@ -373,7 +411,13 @@ function preStrat(x) {
   if (nR === 3) {
     const own = x.raises[1].seat === x.s;
     const ch = own ? VS4.B4 : VS4.COLD4;
-    return { r: ch.r, c: x.effBB < 60 ? mulArr(ch.c, 0.6) : ch.c, to: JAM, spot: own ? "facing 4bet" : "cold vs 4bet" };
+    let r = ch.r, c = x.effBB < 60 ? mulArr(ch.c, 0.6) : ch.c;
+    if (own) { // 내 3벳 레인지 기준: 상위 ~18%는 올인, 상위 ~45%까지는 계속한다 (고정 차트만 쓰면 4벳에 너무 많이 접는다)
+      const R = ownRange(x.st.W[x.s]), jam = topShare(R, 0.18), cont = topShare(R, 0.45);
+      r = r.map((v, i) => Math.max(v, jam[i]));
+      c = c.map((v, i) => clamp(Math.max(v, cont[i] - r[i]), 0, 1 - r[i]));
+    }
+    return { r, c, to: JAM, spot: own ? "facing 4bet" : "cold vs 4bet" };
   }
   return { r: VS4.B5.r, c: VS4.B5.c, to: JAM, spot: "facing 5bet+" };
 }
@@ -389,13 +433,15 @@ function rfiStrat(x) {
 }
 function limpStrat(x) {
   const nL = x.limpers.length, bb = x.bb;
+  // 블라인드 대 블라인드(SB 혼자 림프)는 팟 안의 사람 수로 보면 헤즈업과 같다
+  const bvb = x.hu || (x.pos === "BB" && nL === 1 && x.st.pos[x.limpers[0]] === "SB");
   if (x.effBB <= PUSH_BB) {
-    const r = rankTop(pushWidth(x.hu ? "HU" : PUSH10[x.pos] ? x.pos : "BTN", x.effBB, 0.75));
+    const r = rankTop(pushWidth(bvb ? "HU" : PUSH10[x.pos] ? x.pos : "BTN", x.effBB, 0.75));
     return { r, c: x.pos === "BB" ? oneMinus(r) : ZERO, to: JAM, spot: "vs limp push/fold" };
   }
   if (x.pos === "BB") {
-    const ch = x.hu ? LIMP.HU_BB : LIMP.BB;
-    return { r: ch.r, c: oneMinus(ch.r), to: capJam(x, (x.hu ? 3.5 : 3.5 + nL) * bb), spot: "BB vs limp" };
+    const ch = bvb ? LIMP.HU_BB : LIMP.BB;
+    return { r: ch.r, c: oneMinus(ch.r), to: capJam(x, (bvb ? 3.5 : 3.5 + nL) * bb), spot: "BB vs limp" };
   }
   if (x.pos === "SB") return { r: LIMP.SB.r, c: LIMP.SB.c, to: capJam(x, (4 + nL) * bb), spot: "SB vs limp" };
   return { r: LIMP.ISO.r, c: LIMP.ISO.c, to: capJam(x, (3 + nL) * bb), spot: `vs ${nL} limper${nL > 1 ? "s" : ""}` };
@@ -454,6 +500,11 @@ function threeBetStrat(x) {
   const ip3 = st.ord[x.s] > st.ord[t.seat];
   const spot = key === "SQZ" ? "facing squeeze" : key === "COLD" ? "cold vs 3bet" : ip3 ? "facing 3bet IP" : "facing 3bet OOP";
   let r = ch.r, c = ch.c;
+  if (o.seat === x.s && st.preActs[x.s] === 1) { // 내가 오픈했다: 내 오픈 레인지의 상위 q는 계속한다 (공용 차트만 쓰면 넓은 오픈이 3벳에 너무 많이 접는다)
+    const q = x.hu ? 0.6 : ip3 ? 0.55 : 0.5;
+    const cont = topShare(ownRange(st.W[x.s]), q);
+    c = c.map((v, i) => clamp(Math.max(v, cont[i] - r[i]), 0, 1 - r[i]));
+  }
   const ratio = t.to / Math.max(o.to, 1);
   if (ratio > 4.5) c = mulArr(c, clamp(1 - (ratio - 4.5) * 0.12, 0.5, 1));
   if (x.callers.length) c = mulArr(c, 0.7);
@@ -476,9 +527,20 @@ function jamStrat(x, last) {
   let behind = 0;
   for (const o of x.alive) if (o !== x.s && o !== jammer && !x.callers.includes(o) && st.stack[o] > 0 && st.bets[o] < st.maxBet) behind++;
   const canRe = !last.allin && x.myStack > x.toCall && x.canRaise;
-  const top = rankTop(cw);
+  // 최소 방어: 쓰레기 패(콜 레인지 상대 승률 ~33%)의 올인이 폴드보다 이득이 되지 않을 만큼은 내 레인지 상위로 계속한다.
+  // 상대 레인지를 좁게 읽어도 '아무 패나 올인'에 무너지지 않게 하는 장치. 앞에서 이미 누가 콜했으면 필요 없다
+  let fl = null;
+  if (!x.callers.length && last.from != null) {
+    const inc = last.to - last.from, J = Math.min(last.to, x.myBet + x.myStack) - last.from;
+    const P0 = x.pot - inc, L = J - 0.33 * (P0 + J + x.toCall);
+    const dmin = L > 0 ? P0 / (P0 + L) : 1;
+    const d = 1 - Math.pow(1 - clamp(dmin, 0, 1), 1 / Math.max(1, last.n || 1));
+    if (d > 0) fl = topShare(ownRange(st.W[x.s]), d);
+  }
+  let top = rankTop(cw);
+  if (fl) top = top.map((v, i) => Math.max(v, fl[i]));
   return {
-    r: canRe ? top : ZERO, c: canRe ? ZERO : top, to: JAM, eqMode: true, canRe,
+    r: canRe ? top : ZERO, c: canRe ? ZERO : top, to: JAM, eqMode: true, canRe, fl,
     po, margin: 0.005 + 0.025 * behind, rel: [jammer, ...x.callers.filter((o) => !st.folded[o])],
     spot: `${last.allin ? "vs all-in" : "vs big raise"} (${st.pos[jammer]})`,
   };
@@ -638,7 +700,7 @@ function postEval(st, s, board) {
     const h0 = hs[i], eh = h0 + (1 - h0) * ppot[i] * dk;
     e[i] = k > 1 ? Math.pow(eh, k) : eh;
     tw += W[i];
-    ra += W[i] * eh;
+    ra += W[i] * h0; // 레인지 우위는 지금 만들어진 족보로만 잰다 (드로우 잠재력은 양쪽 모두에게 더해져 대칭이 깨진다)
   }
   x.ra = tw > 0 ? ra / tw : 0.5;
   const p = percentile(e, W, blocked, tw);
@@ -726,6 +788,14 @@ function postPlan(x, W, e, p, tab, tw) {
   }
   D *= inv; A *= inv;
   if (D >= Bl) { P.fd = D > 0 ? Bl / D : 0; P.fa = 0; } else { P.fd = 1; P.fa = A > 0 ? Math.min(1, (Bl - D) / A) : 0; }
+  P.fm = 0;
+  if (st === 1 && size <= 0.4) { // 작은 플롭 벳: 밸류·드로우·에어로 목표 빈도에 못 미치면 중간 강도 핸드로 채운다
+    let M = 0;
+    for (let i = 0; i < NC; i++) if (!blocked[i] && e[i] < vt - 0.04 && !(e[i] < 0.3 && ppot[i] < 0.08) && ppot[i] < 0.3) M += W[i];
+    M *= inv;
+    const short = B - (V + Math.min(D, Bl) + Math.min(A * P.fa, Math.max(0, Bl - D)));
+    if (short > 0 && M > 0) P.fm = Math.min(1, short / M);
+  }
   return P;
 }
 
@@ -734,7 +804,9 @@ const CP = [0, 0, 0];
 function comboProbs(P, i, e) {
   const p = P.p[i], pp = P.ppot[i];
   if (P.facing) {
-    const cont = e >= 0.93 ? 1 : sig((0.45 * (p - P.thrD) + 0.55 * (e * P.R - P.po)) / 0.05);
+    let cont = e >= 0.93 ? 1 : sig((0.45 * (p - P.thrD) + 0.55 * (e * P.R - P.po)) / 0.05);
+    // 직접 오즈가 맞는 드로우는 접지 않는다 (레인지 안 순위만 보면 드로우가 약한 메이드 핸드보다 아래로 밀린다)
+    if (P.street < 3 && pp >= 0.2 && e * P.R > P.po) cont = Math.max(cont, sig((e * P.R - P.po) / 0.02));
     const vr = P.rvm > 0 && e >= P.rthr - 0.04 ? sig((p - P.thrR) / 0.02) : 0;
     const sbw = pp >= 0.2 && e < P.rthr ? Math.min(1, pp / 0.35) : 0;
     let raise = P.canRaise ? Math.min(1, vr + P.fr * sbw) : 0;
@@ -747,7 +819,8 @@ function comboProbs(P, i, e) {
   let sbw = 0, air = 0;
   if (P.street < 3) { sbw = Math.min(1, pp / 0.3); air = e < 0.3 && pp < 0.08 ? 1 : 0; }
   else air = e < 0.25 ? 1 : 0;
-  let bet = val + (1 - val) * Math.min(1, sbw * P.fd + air * P.fa);
+  const mid = P.fm > 0 && e < P.vt - 0.04 && !air && pp < 0.3 ? P.fm : 0;
+  let bet = val + (1 - val) * Math.min(1, sbw * P.fd + air * P.fa + mid);
   if (!P.canRaise) bet = 0;
   CP[0] = 0; CP[1] = 1 - bet; CP[2] = bet;
   return CP;
@@ -906,7 +979,7 @@ function decideInner(m, seat, opts) {
     info.equity = eq;
     info.opponents = rel.length;
     if (S.eqMode) { // 올인(또는 큰 레이즈)에 대한 콜/폴드는 레인지 상대 승률로
-      const want = sig((eq - S.po - S.margin) / 0.02);
+      const want = Math.max(sig((eq - S.po - S.margin) / 0.02), S.fl ? S.fl[cls] : 0);
       if (S.canRe) { r = want; c = 0; } else { c = want; r = 0; }
     } else if (x.pos === "BB" && x.raises.length === 1 && L.toCall > 0) { // BB 가격 방어
       const want = sig((eq * 0.7 - po - 0.01) / 0.02);
@@ -993,7 +1066,7 @@ function describeMix(d) {
 const api = {
   decide, describeMix,
   // 테스트·디버그용
-  _internal: { STATS, parseRange, rangePct, RFI, DEF, VS3, VS4, LIMP, CLS_NAME, CLS, comboOf, rankTop, tracked, boardTable, texture, mcEquity },
+  _internal: { postEval, preCtx, preStrat, comboProbs, topShare, ownRange, STATS, parseRange, rangePct, RFI, DEF, VS3, VS4, LIMP, CLS_NAME, CLS, comboOf, rankTop, tracked, boardTable, texture, mcEquity },
 };
 if (isNode) module.exports = api;
 else root.PokerAI = api;

@@ -125,6 +125,62 @@ function finish(m) { while (m.hand.phase === "runout") T.runoutStep(m); }
   ok(T.positionsOf(m.hand)[0] === "BTN" && T.positionsOf(m.hand)[3] === "BB" && T.positionsOf(m.hand)[1] === undefined, "포지션 이름");
 }
 
+// ---- 8. BB가 모자라게 올인하면: 들어오는 사람은 BB 전액, 최소 레이즈는 2BB ----
+{
+  const m = match(3, [1000, 1000, 5], 0); // 버튼 0, SB 1, BB 2 (5칩 올인)
+  T.startHand(m, deckFor(m, ["As Ad", "Ks Kd", "2c 7h"], "Qh 9c 5d 3s Jh", 0));
+  let L = T.legal(m, 0);
+  ok(L.toCall === 20 && L.minTo === 40 && L.maxBet === 20, "짧은 BB(5): 콜 20, 최소 레이즈 40 " + JSON.stringify(L));
+  T.act(m, 0, "call");
+  L = T.legal(m, 1);
+  ok(m.hand.toAct === 1 && L.toCall === 10 && L.minTo === 40, "SB는 10을 더 내야 함 " + JSON.stringify(L));
+  T.act(m, 1, "call");
+  ok(m.hand.street === 1 && T.potTotal(m.hand) === 45 && total(m) === 2005, "플롭으로, 팟 45 " + T.potTotal(m.hand));
+
+  const m2 = match(3, [1000, 1000, 15], 0); // BB 15 (SB보다 많고 BB보다 적음)
+  T.startHand(m2, deckFor(m2, ["As Ad", "Ks Kd", "2c 7h"], "Qh 9c 5d 3s Jh", 0));
+  L = T.legal(m2, 0);
+  ok(L.toCall === 20 && L.minTo === 40, "짧은 BB(15): 콜 20, 최소 레이즈 40 " + JSON.stringify(L));
+  T.act(m2, 0, "raise", 40);
+  ok(T.legal(m2, 1).toCall === 30 && T.legal(m2, 1).minTo === 60, "2BB 레이즈 뒤 SB " + JSON.stringify(T.legal(m2, 1)));
+
+  // 버튼이 폴드하면 SB는 맞출 사람이 없으니 행동 없이 넘어간다 (넘친 5는 돌려받음)
+  const m3 = match(3, [1000, 1000, 5], 0);
+  T.startHand(m3, deckFor(m3, ["As Ad", "Ks Kd", "2c 7h"], "Qh 9c 5d 3s Jh", 0));
+  T.act(m3, 0, "fold");
+  ok(m3.hand.phase === "runout", "SB 행동 없이 러너웃 " + m3.hand.phase + " " + m3.hand.toAct);
+  finish(m3);
+  ok(m3.players[1].stack === 1005 && m3.players[2].stack === 0 && total(m3) === 2005, "SB 승리 정산 " + m3.players.map((p) => p.stack));
+
+  // 헤즈업: 짧은 BB(15)에는 15까지만 맞추면 된다 (더 내도 돌려받으니)
+  const m4 = match(2, [1000, 15], 0);
+  T.startHand(m4, deckFor(m4, ["As Ad", "Ks Kd"], "2h 3c 8d 9s 4h", 0));
+  L = T.legal(m4, 0);
+  ok(m4.hand.toAct === 0 && L.toCall === 5 && !L.canRaise, "헤즈업 짧은 BB: 콜 5만 " + JSON.stringify(L));
+}
+
+// ---- 9. 탈락이 생겨도 BB는 한 자리씩 돈다 (건너뛰거나 두 번 연속 내는 사람 없음) ----
+{
+  // 3인 → 헤즈업: 직전 BB(2)가 다시 BB를 내면 안 된다
+  const m = match(3, [300, 1000, 1000], 0);
+  T.startHand(m, deckFor(m, ["2c 7h", "Ks Kd", "As Ad"], "Qh 9c 5d 3s Jh", 0));
+  ok(m.hand.bbSeat === 2, "1핸드 BB 2");
+  T.act(m, 0, "raise", 300); T.act(m, 1, "fold"); T.act(m, 2, "call"); finish(m);
+  ok(m.players[0].out, "0 탈락");
+  T.startHand(m);
+  ok(m.hand.bbSeat === 1 && m.hand.button === 2 && m.hand.sbSeat === 2, "헤즈업 전환: BB 1, 버튼·SB 2 " + [m.hand.button, m.hand.sbSeat, m.hand.bbSeat]);
+
+  // 4인: 직전 BB(2)가 탈락하면 다음 BB는 그다음 사람(3). 3이 BB를 건너뛰면 안 된다
+  const m2 = match(4, [1000, 1000, 300, 1000], 0); // 버튼 0, SB 1, BB 2, UTG 3
+  T.startHand(m2, deckFor(m2, ["2s 2d", "3s 3d", "7c 2h", "As Ad"], "Qh 9c 5d 3h Jh", 0));
+  T.act(m2, 3, "raise", 1000); T.act(m2, 0, "fold"); T.act(m2, 1, "fold"); T.act(m2, 2, "call"); finish(m2);
+  ok(m2.players[2].out, "2 탈락");
+  T.startHand(m2);
+  const h2 = m2.hand;
+  ok(h2.bbSeat === 3 && h2.sbSeat === 1 && h2.button === 0, "BB는 3으로 " + [h2.button, h2.sbSeat, h2.bbSeat]);
+  ok(T.positionsOf(h2)[0] === "BTN" && T.positionsOf(h2)[1] === "SB" && T.positionsOf(h2)[3] === "BB", "포지션 이름 " + T.positionsOf(h2));
+}
+
 // ---- 7. 무작위 대량 시뮬레이션: 칩 보존·규칙 불변식 ----
 function randomPolicy(m, s) {
   const L = T.legal(m, s), r = Math.random();
@@ -140,11 +196,14 @@ for (let n = 2; n <= 6; n++) {
   for (let g = 0; g < 60; g++) {
     const m = T.createMatch({ players: Array.from({ length: n }, (_, i) => ({ name: "P" + i, kind: "bot" })), startStack: 1000, levels: LEVELS, handsPerLevel: 6 });
     const T0 = n * 1000;
-    let guard = 0;
+    let guard = 0, prevBB = -1;
     while (!m.over && guard++ < 3000) {
       T.startHand(m);
       hands++;
       const h = m.hand;
+      if (prevBB >= 0 && h.bbSeat !== T.nextIn(h.seats, prevBB)) ok(false, `BB가 한 자리씩 돌지 않음 ${prevBB} → ${h.bbSeat} (${h.seats})`);
+      if (h.seats.length > 2 && !(T.nextIn(h.seats, h.button) === h.sbSeat && T.nextIn(h.seats, h.sbSeat) === h.bbSeat)) ok(false, "버튼·SB·BB 순서");
+      prevBB = h.bbSeat;
       let steps = 0;
       while (h.phase !== "done") {
         if (++steps > 500) { ok(false, "핸드가 끝나지 않음"); break; }

@@ -52,6 +52,8 @@ let fast = false;      // 빨리 감기 (내가 핸드에서 빠졌을 때)
 let hintOn = false;    // GTO 힌트 표시
 let hint = { key: "", d: null };
 let controlsKey = "", logKey = "", tableKey = "";
+let turnKey = "", turnAt = 0; // 내 차례 버튼이 새로 나타난 때: 더블클릭·연타가 새 버튼을 누르지 않게 잠깐 막는다
+const INPUT_LOCK_MS = 350;
 let setup = { n: 6, claude: true }; // 설정 창에서 고른 값
 const tallMQ = window.matchMedia("(max-width: 600px)");
 
@@ -97,7 +99,7 @@ function newMatch(n, claudeOn) {
     watched: false, // 탈락 뒤 계속 지켜봤는지
   };
   fast = false;
-  tableKey = controlsKey = logKey = "";
+  tableKey = controlsKey = logKey = turnKey = "";
   startHand();
 }
 
@@ -123,7 +125,7 @@ function startHand() {
 function stopAll() {
   clearTimeout(timer);
   clearTimeout(endTimer);
-  thinking?.ctl.abort();
+  if (thinking) { thinking.stopped = true; thinking.ctl.abort(); } // 멈춤(설정 창 등): 이 수는 두지 않고, 이어하면 다시 묻는다
   thinking = null;
 }
 
@@ -133,7 +135,14 @@ function advance() {
   const m = S.m, h = m.hand;
   clearTimeout(timer);
   syncLog();
-  if (h.phase === "done") handDone(h);
+  if (h.phase === "done") {
+    handDone(h);
+    // 탈락 · 우승 창 (설정 창 등으로 멈췄다 이어해도 다시 예약)
+    if (needsEndModal()) {
+      clearTimeout(endTimer);
+      endTimer = setTimeout(showEnd, 1600);
+    }
+  }
   save();
   render();
   if (h.phase === "runout") {
@@ -194,10 +203,6 @@ function handDone(h) {
   }
   const net = h.seats.includes(YOU) ? m.players[YOU].stack - h.start[YOU] : null;
   S.history = [{ no: h.no, net, log: S.log.slice() }, ...S.history].slice(0, 30);
-  if (needsEndModal()) {
-    clearTimeout(endTimer);
-    endTimer = setTimeout(showEnd, 1600);
-  }
 }
 
 const needsEndModal = () => (S.m.over && S.ended !== "over") || (S.m.players[YOU].out && !S.ended);
@@ -284,9 +289,10 @@ async function claudeTurn(h) {
   } catch (e) {
     note = sampleErrorNote(e?.code);
   }
-  if (thinking === me) thinking = null;
-  // 그 사이 새 핸드 · 새 게임이 시작됐거나 차례가 바뀌었으면 버린다
-  if (!S || S.m !== m || m.hand !== h || h.phase !== "bet" || h.toAct !== seat || h.actions.length !== me.n) {
+  const stale = me.stopped || thinking !== me;
+  if (!stale) thinking = null;
+  // 멈췄거나(설정 창 · 새 게임) 그 사이 새 핸드가 시작됐거나 차례가 바뀌었으면 버린다. 건너뛰기만 엔진 수로 둔다
+  if (stale || !S || S.m !== m || m.hand !== h || h.phase !== "bet" || h.toAct !== seat || h.actions.length !== me.n) {
     if (S) render();
     return;
   }
@@ -412,6 +418,7 @@ function historyEn(h, seat, pos, who) {
 function userAct(type, to) {
   const h = S?.m.hand;
   if (!h || h.phase !== "bet" || h.toAct !== YOU) return;
+  if (performance.now() - turnAt < INPUT_LOCK_MS) return; // 버튼이 방금 바뀌었다: 앞 수의 두 번째 클릭·키로 본다
   const L = PT.legal(S.m, YOU);
   if (type === "fold" && L.toCall === 0) return;
   if (type === "raise" && !L.canRaise) return;
@@ -494,7 +501,8 @@ function load() {
   try {
     const g = JSON.parse(localStorage.getItem(SAVE_KEY));
     const m = g?.m;
-    if (!g || g.v !== 2 || !m || m.v !== 2 || !Array.isArray(m.players) || !m.hand || m.over) return null;
+    // 끝난 매치는 최종 결과 창을 아직 못 봤을 때만 되살린다
+    if (!g || g.v !== 2 || !m || m.v !== 2 || !Array.isArray(m.players) || !m.hand || (m.over && g.ended === "over")) return null;
     if (m.players.length < 2 || m.players.length > 6 || !g.stats || !Array.isArray(g.history) || !Array.isArray(g.log) || !g.logAt) return null;
     return g;
   } catch {
@@ -744,6 +752,8 @@ function renderControls() {
   box.classList.toggle("mine", h.phase === "bet" && h.toAct === YOU);
   if (h.phase === "done") box.innerHTML = doneHtml(h);
   else if (h.phase === "bet" && h.toAct === YOU) {
+    const tk = `${m.handNo}|${h.actions.length}`;
+    if (tk !== turnKey) { turnKey = tk; turnAt = performance.now(); }
     const L = PT.legal(m, YOU);
     box.innerHTML = myTurnHtml(h, L);
     syncRaiseLabel(L);
@@ -890,7 +900,10 @@ function openModal(html) {
   const card = $("modal-card");
   (card.querySelector(".btn.primary") || card.querySelector("button"))?.focus();
 }
-const closeModal = () => { $("modal").hidden = true; };
+const closeModal = () => {
+  $("modal").hidden = true;
+  turnAt = performance.now(); // 창 버튼을 두 번 눌러도 뒤의 내 차례 버튼이 눌리지 않게
+};
 
 function setupHtml(resume) {
   const n = setup.n;
@@ -989,7 +1002,10 @@ document.addEventListener("click", (e) => {
     case "m-setup": openSetup(false); return;
     case "m-watch": S.watched = true; save(); closeModal(); if (!thinking) advance(); return;
     case "m-close": closeModal(); if (S && !thinking) advance(); return;
-    case "new-game": if (S && !S.m.over) openModal(confirmNewHtml()); else openSetup(false); return;
+    case "new-game":
+      if (S && !S.m.over) { stopAll(); render(); openModal(confirmNewHtml()); } // 묻는 동안 게임을 멈춘다 (계속하기 → 이어서)
+      else openSetup(false);
+      return;
     case "next": startHand(); return;
     case "show-end": clearTimeout(endTimer); if (S.ended && S.m.over) openModal(endHtml()); else showEnd(); return;
     case "fast": fast = !fast; controlsKey = ""; if (h?.phase !== "done" && !thinking) advance(); else render(); return;
@@ -1044,7 +1060,7 @@ document.addEventListener("change", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
-  if (!S || !$("modal").hidden || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!S || !$("modal").hidden || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return; // 누르고 있어 반복되는 키는 무시
   const typing = e.target.matches?.("input[type=number]");
   const h = S.m.hand, k = e.key.toLowerCase();
   if (e.key === "Enter") {
@@ -1072,7 +1088,8 @@ function boot() {
     S = saved;
     setup = { n: S.m.players.length, claude: S.claudeOn };
     render(); // 저장할 때 진행 중이던 차례·카드 펼치기는 이어하기를 누르면 다시 시작된다
-    openModal(setupHtml(true));
+    if (S.m.over) showEnd(); // 마지막 핸드 뒤 결과 창을 보기 전에 닫았으면 결과부터
+    else openModal(setupHtml(true));
   } else {
     renderPreview(setup.n);
     openModal(setupHtml(false));

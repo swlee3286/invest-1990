@@ -1,5 +1,5 @@
 // GTO AI 테스트: node poker/test/ai.test.js  (실패하면 종료 코드 1)
-// a) 합법성·견고성  b) 속도  c) 정보 위생  d) 프리플롭 빈도  e) 포스트플롭 기본기  f) 실력(bb/100)
+// a) 합법성·견고성  b) 속도  c) 정보 위생  d) 프리플롭 빈도  e) 포스트플롭 기본기  f) 실력(bb/100)  g) 리뷰에서 찾은 약점 회귀
 const T = require("../table.js");
 const E = require("../engine.js");
 const AI = require("../gto.js");
@@ -358,6 +358,87 @@ function duel(opp, n, deals, stackBB = 100) {
     console.log(`   vs ${opp.padEnd(11)} ${n === 2 ? "heads-up" : "6-max   "} ${String(bb).padStart(3)}bb: ${r.bb100.toFixed(1).padStart(6)} bb/100 ±${r.se.toFixed(1)} (${r.hands} GTO seat-hands, ${deals * 2} games, ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     ok(r.bb100 > 0, `vs ${opp} n=${n} ${bb}bb: ${r.bb100.toFixed(1)} bb/100`); // 표본: 기대값 대비 표준오차 3배 이상 여유
   }
+}
+
+// ===== g) 리뷰에서 찾은 약점 회귀: 올인 레인지 · 3벳/4벳 방어 · 보드별 c-bet · 드로우 · 블라인드 대 블라인드 =====
+{
+  const I = AI._internal;
+  // hero 자리의 결정을 조합별 가중치 w(a, b)로 평균한 행동 빈도 (다른 좌석 카드는 읽지 않으므로 hole만 바꿔 끼운다)
+  const freqs = (m, hero, w) => {
+    const h = m.hand, dead = new Set(h.board), saved = h.hole[hero], rng = mulberry32(3), out = { fold: 0, check: 0, call: 0, raise: 0 };
+    let tot = 0;
+    for (let a = 1; a < 52; a++) for (let b = 0; b < a; b++) {
+      if (dead.has(a) || dead.has(b)) continue;
+      const x = w(a, b);
+      if (!(x > 0)) continue;
+      h.hole[hero] = [a, b];
+      for (const y of AI.decide(m, hero, { rng }).mix) out[y.action] += x * y.freq;
+      tot += x;
+    }
+    h.hole[hero] = saved;
+    for (const k in out) out[k] /= tot;
+    return out;
+  };
+  const byClass = (arr) => (a, b) => arr[I.CLS[I.comboOf(a, b)]];
+  const any = () => 1;
+  // steps: [seat, "raise", bb] | [seat, "allin"] | [seat, "bet", 팟 비율] | [seat, "fold"|"call"|"check"]. 프리플롭에선 그 자리까지 나머지는 폴드
+  const spot = (n, stackBB, steps, holes = {}, board) => {
+    const m = newMatch(n, { stack: 20 * stackBB, levels: [[10, 20]], perLevel: 1e9, button: 0 });
+    T.startHand(m, deckFor(m, holes, board));
+    const h = m.hand;
+    for (const [s, type, x] of steps) {
+      while (h.street === 0 && h.toAct !== s) T.act(m, h.toAct, "fold");
+      const L = T.legal(m, s);
+      if (type === "allin") T.act(m, s, "raise", L.maxTo);
+      else if (type === "raise") T.act(m, s, "raise", Math.round(x * h.bb));
+      else if (type === "bet") T.act(m, s, "raise", L.maxBet + Math.round((x * (T.potTotal(h) + L.toCall)) / 10) * 10);
+      else T.act(m, s, type);
+    }
+    return m;
+  };
+  const toBB = (m, s) => { while (m.hand.toAct !== s) T.act(m, m.hand.toAct, "fold"); return m; };
+  const rows = [];
+  const check = (label, v, good) => { rows.push(`${label}: ${pct(v)}`); ok(good(v), `${label} ${pct(v)}`); };
+  // 올인: 크기에 맞춘 레인지로 읽는다 (헤즈업 15bb 내시 콜 ~27%, 100bb 오픈 올인은 좁게)
+  check("HU 15bb BB call vs SB shove", freqs(spot(2, 15, [[0, "allin"]]), 1, any).call, (v) => v >= 0.18 && v <= 0.36);
+  check("6max 100bb BB call vs UTG shove", freqs(toBB(spot(6, 100, [[3, "allin"]]), 2), 2, any).call, (v) => v > 0.005 && v <= 0.05);
+  {
+    const W = I.tracked(spot(6, 10, [[3, "allin"]]).hand).W[3];
+    let t = 0;
+    for (const v of W) t += v;
+    check("tracked width of 10bb UTG shove (pushes 12%)", t / W.length, (v) => v <= 0.135);
+  }
+  // 최소 방어: 아무 패나 리샤브해도 이득이 안 될 만큼은 오픈 레인지로 계속한다
+  check("HU 100bb SB open vs BB reshove, continue", 1 - freqs(spot(2, 100, [[0, "raise", 2.5], [1, "allin"]]), 0, byClass(I.RFI.HU)).fold, (v) => v >= 0.08);
+  check("HU 25bb SB open vs BB reshove, continue", 1 - freqs(spot(2, 25, [[0, "raise", 2], [1, "allin"]]), 0, byClass(I.RFI.HU)).fold, (v) => v >= 0.24);
+  // 3벳·4벳에 너무 많이 접지 않는다 (솔버 기준 ~45~55%)
+  check("CO open vs BTN 3bet, fold", freqs(toBB(spot(6, 100, [[5, "raise", 2.5], [0, "raise", 7.5]]), 5), 5, byClass(I.RFI.CO)).fold, (v) => v <= 0.55);
+  check("HU BTN open vs BB 3bet, fold", freqs(spot(2, 100, [[0, "raise", 2.5], [1, "raise", 9]]), 0, byClass(I.RFI.HU)).fold, (v) => v <= 0.45);
+  check("BB 3bet vs BTN 4bet, fold", freqs(spot(6, 100, [[0, "raise", 2.5], [2, "raise", 10], [0, "raise", 22]]), 2, byClass(I.DEF.BB_BTN.r)).fold, (v) => v <= 0.62);
+  check("HU BB 3bet vs 4bet, fold", freqs(spot(2, 100, [[0, "raise", 2.5], [1, "raise", 9], [0, "raise", 20]]), 1, byClass(I.DEF.HU_BB.r)).fold, (v) => v <= 0.62);
+  // 레인지 우위: 같은 레인지면 어느 보드든 0.5, 그래서 c-bet은 마른 보드에서 더 많이
+  for (const b of ["9s 8s 7s", "5c 4d 3h"]) {
+    const m = spot(2, 100, [[0, "call"], [1, "check"]], {}, b), st = I.tracked(m.hand);
+    st.W[0].fill(1); st.W[1].fill(1);
+    check(`range advantage with identical ranges on ${b}`, I.postEval(st, m.hand.toAct, m.hand.board).x.ra, (v) => Math.abs(v - 0.5) < 0.01);
+  }
+  const cbet = {};
+  for (const b of ["Ah 7c 2d", "9s 8s 7s"]) {
+    const m = spot(6, 100, [[0, "raise", 2.5], [1, "fold"], [2, "call"], [2, "check"]], {}, b);
+    const W = I.tracked(m.hand).W[0];
+    cbet[b] = freqs(m, 0, (a, c) => { const w = W[I.comboOf(a, c)]; return w > 0.041 ? w : 0; }).raise;
+    rows.push(`BTN c-bet vs BB on ${b}: ${pct(cbet[b])}`);
+  }
+  ok(cbet["Ah 7c 2d"] >= 0.72 && cbet["Ah 7c 2d"] > cbet["9s 8s 7s"] + 0.2, `c-bet A72r ${pct(cbet["Ah 7c 2d"])} vs 987sss ${pct(cbet["9s 8s 7s"])}`);
+  // 팟 오즈가 맞는 드로우는 c-bet에 접지 않는다
+  for (const [hole, f] of [["5h 3h", 0.5], ["Td 7c", 0.75]]) {
+    const m = spot(6, 100, [[0, "raise", 2.5], [1, "fold"], [2, "call"], [2, "check"], [0, "bet", f]], { 2: hole }, "9h 8h 4c");
+    const d = AI.decide(m, 2, { rng: mulberry32(1) });
+    check(`BB ${hole} on 9h8h4c vs ${f} pot c-bet, fold`, d.mix.filter((x) => x.action === "fold").reduce((t, x) => t + x.freq, 0), (v) => v <= 0.3);
+  }
+  // 블라인드 대 블라인드: SB 림프에 BB는 헤즈업 차트로 레이즈
+  for (const n of [6, 3]) check(`${n}-handed BB raise vs SB limp`, freqs(spot(n, 100, [[1, "call"]]), 2, any).raise, (v) => v >= 0.15);
+  console.log("g) review regressions:\n   " + rows.join("\n   "));
 }
 
 // ===== 설명 문자열 =====

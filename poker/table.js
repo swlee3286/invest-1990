@@ -35,6 +35,12 @@ function nextIn(list, seat) {
   return list[0];
 }
 
+// list에서 seat 앞 좌석 (시계 반대 방향)
+function prevIn(list, seat) {
+  for (let i = list.length - 1; i >= 0; i--) if (list[i] < seat) return list[i];
+  return list[list.length - 1];
+}
+
 function blindsAt(m, handNo) {
   return m.levels[Math.min(Math.floor((handNo - 1) / m.handsPerLevel), m.levels.length - 1)];
 }
@@ -44,10 +50,20 @@ function startHand(m, deck = PK.shuffledDeck()) {
   const live = liveSeats(m), N = m.players.length;
   if (live.length < 2) throw new Error("not enough players");
   m.handNo++;
-  m.button = m.button < 0 ? live[PK.randInt(live.length)] : nextIn(live, m.button);
   const [sb, bb] = blindsAt(m, m.handNo);
-  const sbSeat = live.length === 2 ? m.button : nextIn(live, m.button);
-  const bbSeat = nextIn(live, sbSeat);
+  // BB는 탈락자가 생겨도 직전 BB 다음의 살아 있는 사람에게 넘어간다 (BB를 건너뛰거나 두 번 연속 내는 사람이 없게).
+  // SB·버튼은 BB에서 거꾸로 살아 있는 자리로 정한다. 첫 핸드는 버튼에서 시작
+  const prevBB = m.hand ? m.hand.bbSeat : -1;
+  let sbSeat, bbSeat;
+  if (prevBB < 0) {
+    m.button = m.button < 0 ? live[PK.randInt(live.length)] : nextIn(live, m.button);
+    sbSeat = live.length === 2 ? m.button : nextIn(live, m.button);
+    bbSeat = nextIn(live, sbSeat);
+  } else {
+    bbSeat = nextIn(live, prevBB);
+    sbSeat = prevIn(live, bbSeat);
+    m.button = live.length === 2 ? sbSeat : prevIn(live, sbSeat);
+  }
   const arr = (v) => Array.from({ length: N }, () => v);
   const h = {
     no: m.handNo, sb, bb,
@@ -95,19 +111,22 @@ function pay(m, seat, a) {
 }
 
 const maxBet = (h) => Math.max(...h.seats.map((s) => h.bets[s]));
+// 지금 맞춰야 하는 베팅: 프리플롭은 BB가 모자라게 올인했어도 BB 전액이 기준 (최소 레이즈도 2BB부터)
+const curBet = (h) => (h.street === 0 ? Math.max(maxBet(h), h.bb) : maxBet(h));
 const potTotal = (h) => h.seats.reduce((t, s) => t + h.contrib[s], 0);
 const aliveSeats = (h) => h.seats.filter((s) => !h.folded[s]);
 
 // seat이 지금 할 수 있는 것
 function legal(m, seat) {
-  const h = m.hand, stack = m.players[seat].stack, mb = maxBet(h);
-  const toCall = Math.min(mb - h.bets[seat], stack);
+  const h = m.hand, stack = m.players[seat].stack, mb = curBet(h);
   let cap = 0, othersCanAct = false;
   for (const s of h.seats) {
     if (s === seat || h.folded[s]) continue;
     cap = Math.max(cap, h.bets[s] + m.players[s].stack); // 아무도 받을 수 없는 금액까지는 올리지 않는다
     if (m.players[s].stack > 0) othersCanAct = true;
   }
+  // 짧은 BB만 남아 BB 전액을 받을 사람이 없으면, 실제로 나온 최고 베팅(또는 받을 수 있는 만큼)까지만 맞춘다
+  const toCall = Math.min(Math.min(mb, Math.max(maxBet(h), cap)) - h.bets[seat], stack);
   const maxTo = Math.min(h.bets[seat] + stack, cap);
   const minInc = Math.max(h.lastRaise, h.bb);
   // 이미 행동한 사람은 그 뒤로 '완전한 레이즈' 만큼 올라왔을 때만 다시 레이즈할 수 있다 (모자란 올인은 재개하지 않음)
@@ -144,7 +163,7 @@ function act(m, seat, type, to) {
     throw new Error(`unknown action ${type}`);
   }
   rec.allin = type !== "fold" && m.players[seat].stack === 0;
-  h.actedOn[seat] = maxBet(h);
+  h.actedOn[seat] = curBet(h);
   h.actions.push(rec);
   afterAction(m, seat);
   return rec;
@@ -154,10 +173,10 @@ function act(m, seat, type, to) {
 function needsToAct(m, s) {
   const h = m.hand;
   if (h.folded[s] || m.players[s].stack === 0) return false;
-  const mb = maxBet(h);
-  if (h.bets[s] < mb) return true;
+  const L = legal(m, s);
+  if (L.toCall > 0) return true;
   if (h.actedOn[s] !== null) return false;
-  return legal(m, s).canRaise; // 맞춰져 있고 아직 행동 전: 올릴 수 있을 때만 (체크만 남았으면 건너뜀)
+  return L.canRaise; // 맞춰져 있고 아직 행동 전: 올릴 수 있을 때만 (체크만 남았으면 건너뜀)
 }
 
 function findNext(m, from) {
@@ -308,7 +327,7 @@ function positionsOf(h) {
 
 const api = {
   POSITION_NAMES, createMatch, startHand, legal, act, runoutStep, buildPots, positionsOf,
-  liveSeats, aliveSeats, nextIn, blindsAt, maxBet, potTotal, needsToAct,
+  liveSeats, aliveSeats, nextIn, prevIn, blindsAt, maxBet, curBet, potTotal, needsToAct,
 };
 if (typeof module !== "undefined") module.exports = api;
 else root.PokerTable = api;
